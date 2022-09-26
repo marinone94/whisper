@@ -6,7 +6,10 @@ from typing import Iterator, List, Match, Optional, Union
 
 from more_itertools import windowed
 
-from .basic import remove_symbols_and_diacritics
+try:
+    from .basic import remove_symbols_and_diacritics
+except ImportError:
+    from whisper.normalizers.basic import remove_symbols_and_diacritics
 
 
 class EnglishNumberNormalizer:

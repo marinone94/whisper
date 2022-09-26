@@ -8,9 +8,12 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch import nn
 
-from .transcribe import transcribe as transcribe_function
-from .decoding import detect_language as detect_language_function, decode as decode_function
-
+try:
+    from .transcribe import transcribe as transcribe_function
+    from .decoding import detect_language as detect_language_function, decode as decode_function
+except ImportError:
+    from whisper.transcribe import transcribe as transcribe_function
+    from whisper.decoding import detect_language as detect_language_function, decode as decode_function
 
 @dataclass
 class ModelDimensions:

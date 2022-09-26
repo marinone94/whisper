@@ -7,13 +7,20 @@ import numpy as np
 import torch
 import tqdm
 
-from .audio import SAMPLE_RATE, N_FRAMES, HOP_LENGTH, pad_or_trim, log_mel_spectrogram
-from .decoding import DecodingOptions, DecodingResult
-from .tokenizer import LANGUAGES, TO_LANGUAGE_CODE, get_tokenizer
-from .utils import exact_div, format_timestamp, optional_int, optional_float, str2bool, write_vtt, write_srt
-
-if TYPE_CHECKING:
-    from .model import Whisper
+try:
+    from .audio import SAMPLE_RATE, N_FRAMES, HOP_LENGTH, pad_or_trim, log_mel_spectrogram
+    from .decoding import DecodingOptions, DecodingResult
+    from .tokenizer import LANGUAGES, TO_LANGUAGE_CODE, get_tokenizer
+    from .utils import exact_div, format_timestamp, optional_int, optional_float, str2bool, write_vtt, write_srt
+    if TYPE_CHECKING:
+        from .model import Whisper
+except ImportError:
+    from whisper.audio import SAMPLE_RATE, N_FRAMES, HOP_LENGTH, pad_or_trim, log_mel_spectrogram
+    from whisper.decoding import DecodingOptions, DecodingResult
+    from whisper.tokenizer import LANGUAGES, TO_LANGUAGE_CODE, get_tokenizer
+    from whisper.utils import exact_div, format_timestamp, optional_int, optional_float, str2bool, write_vtt, write_srt
+    if TYPE_CHECKING:
+        from whisper.model import Whisper
 
 
 def transcribe(
@@ -240,8 +247,27 @@ def transcribe(
     return dict(text=tokenizer.decode(all_tokens), segments=all_segments, language=language)
 
 
+def stream_transcribe(
+    model: "Whisper",
+    audio: Union[str, np.ndarray, torch.Tensor],
+    *,
+    verbose: bool = False,
+    temperature: Union[float, Tuple[float, ...]] = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
+    compression_ratio_threshold: Optional[float] = 2.4,
+    logprob_threshold: Optional[float] = -1.0,
+    no_speech_threshold: Optional[float] = 0.6,
+    condition_on_previous_text: bool = True,
+    **decode_options,
+):
+
+    raise NotImplementedError("Not implemented yet.")
+
+
 def cli():
-    from . import available_models
+    try:
+        from . import available_models
+    except ImportError:
+        from whisper import available_models
 
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("audio", nargs="+", type=str, help="audio file(s) to transcribe")
@@ -249,6 +275,7 @@ def cli():
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu", help="device to use for PyTorch inference")
     parser.add_argument("--output_dir", "-o", type=str, default=".", help="directory to save the outputs")
     parser.add_argument("--verbose", type=str2bool, default=True, help="whether to print out the progress and debug messages")
+    parser.add_argument("--streaming", type=str2bool, default=False, help="Whether to transcribe as if it was a live streaming")
 
     parser.add_argument("--task", type=str, default="transcribe", choices=["transcribe", "translate"], help="whether to perform X->X speech recognition ('transcribe') or X->English translation ('translate')")
     parser.add_argument("--language", type=str, default=None, choices=sorted(LANGUAGES.keys()) + sorted([k.title() for k in TO_LANGUAGE_CODE.keys()]), help="language spoken in the audio, specify None to perform language detection")
@@ -272,6 +299,7 @@ def cli():
     model_name: str = args.pop("model")
     output_dir: str = args.pop("output_dir")
     device: str = args.pop("device")
+    streaming: bool = args.pop("streaming")
     os.makedirs(output_dir, exist_ok=True)
 
     if model_name.endswith(".en") and args["language"] not in {"en", "English"}:
@@ -285,11 +313,21 @@ def cli():
     else:
         temperature = [temperature]
 
-    from . import load_model
+    try:
+        from . import load_model
+    except ImportError:
+        from whisper import load_model
+
     model = load_model(model_name, device=device)
 
     for audio_path in args.pop("audio"):
-        result = transcribe(model, audio_path, temperature=temperature, **args)
+        if streaming is False:
+            result = transcribe(model, audio_path, temperature=temperature, **args)
+        elif streaming is True:
+            result = stream_transcribe(model, audio_path, temperature=temperature, **args)
+        else:
+            raise ValueError(
+                f"--streaming arg must be <'True'> or <'False'> but is {streaming}")
 
         audio_basename = os.path.basename(audio_path)
 

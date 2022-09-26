@@ -8,10 +8,16 @@ from typing import List, Optional, Union
 import torch
 from tqdm import tqdm
 
-from .audio import load_audio, log_mel_spectrogram, pad_or_trim
-from .decoding import DecodingOptions, DecodingResult, decode, detect_language
-from .model import Whisper, ModelDimensions
-from .transcribe import transcribe
+try:
+    from .audio import load_audio, log_mel_spectrogram, pad_or_trim
+    from .decoding import DecodingOptions, DecodingResult, decode, detect_language
+    from .model import Whisper, ModelDimensions
+    from .transcribe import transcribe
+except ImportError:
+    from whisper.audio import load_audio, log_mel_spectrogram, pad_or_trim
+    from whisper.decoding import DecodingOptions, DecodingResult, decode, detect_language
+    from whisper.model import Whisper, ModelDimensions
+    from whisper.transcribe import transcribe
 
 
 _MODELS = {

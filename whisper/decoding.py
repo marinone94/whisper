@@ -7,12 +7,18 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch.distributions import Categorical
 
-from .audio import CHUNK_LENGTH
-from .tokenizer import Tokenizer, get_tokenizer
-from .utils import compression_ratio
-
-if TYPE_CHECKING:
-    from .model import Whisper
+try:
+    from .audio import CHUNK_LENGTH
+    from .tokenizer import Tokenizer, get_tokenizer
+    from .utils import compression_ratio
+    if TYPE_CHECKING:
+        from .model import Whisper
+except ImportError:
+    from whisper.audio import CHUNK_LENGTH
+    from whisper.tokenizer import Tokenizer, get_tokenizer
+    from whisper.utils import compression_ratio
+    if TYPE_CHECKING:
+        from whisper.model import Whisper 
 
 
 @torch.no_grad()

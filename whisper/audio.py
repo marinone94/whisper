@@ -7,7 +7,10 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from .utils import exact_div
+try:
+    from .utils import exact_div
+except ImportError:
+    from whisper.utils import exact_div
 
 # hard-coded audio hyperparameters
 SAMPLE_RATE = 16000
