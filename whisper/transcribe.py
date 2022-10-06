@@ -10,7 +10,7 @@ import tqdm
 from .audio import SAMPLE_RATE, N_FRAMES, HOP_LENGTH, pad_or_trim, log_mel_spectrogram
 from .decoding import DecodingOptions, DecodingResult
 from .tokenizer import LANGUAGES, TO_LANGUAGE_CODE, get_tokenizer
-from .utils import exact_div, format_timestamp, optional_int, optional_float, str2bool, write_vtt, write_srt
+from .utils import exact_div, format_timestamp, optional_int, optional_float, str2bool, write_txt, write_vtt, write_srt
 
 if TYPE_CHECKING:
     from .model import Whisper
@@ -20,7 +20,7 @@ def transcribe(
     model: "Whisper",
     audio: Union[str, np.ndarray, torch.Tensor],
     *,
-    verbose: bool = False,
+    verbose: Optional[bool] = None,
     temperature: Union[float, Tuple[float, ...]] = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
     compression_ratio_threshold: Optional[float] = 2.4,
     logprob_threshold: Optional[float] = -1.0,
@@ -40,7 +40,8 @@ def transcribe(
         The path to the audio file to open, or the audio waveform
 
     verbose: bool
-        Whether to display the text being decoded to the console
+        Whether to display the text being decoded to the console. If True, displays all the details,
+        If False, displays minimal details. If None, does not display anything
 
     temperature: Union[float, Tuple[float, ...]]
         Temperature for sampling. It can be a tuple of temperatures, which will be successfully used
@@ -88,43 +89,40 @@ def transcribe(
         segment = pad_or_trim(mel, N_FRAMES).to(model.device).to(dtype)
         _, probs = model.detect_language(segment)
         decode_options["language"] = max(probs, key=probs.get)
-        print(f"Detected language: {LANGUAGES[decode_options['language']].title()}")
+        if verbose is not None:
+            print(f"Detected language: {LANGUAGES[decode_options['language']].title()}")
 
-    mel = mel.unsqueeze(0)
     language = decode_options["language"]
     task = decode_options.get("task", "transcribe")
     tokenizer = get_tokenizer(model.is_multilingual, language=language, task=task)
 
-    def decode_with_fallback(segment: torch.Tensor) -> List[DecodingResult]:
+    def decode_with_fallback(segment: torch.Tensor) -> DecodingResult:
         temperatures = [temperature] if isinstance(temperature, (int, float)) else temperature
-        kwargs = {**decode_options}
-        t = temperatures[0]
-        if t == 0:
-            best_of = kwargs.pop("best_of", None)
-        else:
-            best_of = kwargs.get("best_of", None)
+        decode_result = None
 
-        options = DecodingOptions(**kwargs, temperature=t)
-        results = model.decode(segment, options)
+        for t in temperatures:
+            kwargs = {**decode_options}
+            if t > 0:
+                # disable beam_size and patience when t > 0
+                kwargs.pop("beam_size", None)
+                kwargs.pop("patience", None)
+            else:
+                # disable best_of when t == 0
+                kwargs.pop("best_of", None)
 
-        kwargs.pop("beam_size", None)  # no beam search for t > 0
-        kwargs.pop("patience", None)  # no patience for t > 0
-        kwargs["best_of"] = best_of  # enable best_of for t > 0
-        for t in temperatures[1:]:
-            needs_fallback = [
-                compression_ratio_threshold is not None
-                and result.compression_ratio > compression_ratio_threshold
-                or logprob_threshold is not None
-                and result.avg_logprob < logprob_threshold
-                for result in results
-            ]
-            if any(needs_fallback):
-                options = DecodingOptions(**kwargs, temperature=t)
-                retries = model.decode(segment[needs_fallback], options)
-                for retry_index, original_index in enumerate(np.nonzero(needs_fallback)[0]):
-                    results[original_index] = retries[retry_index]
+            options = DecodingOptions(**kwargs, temperature=t)
+            decode_result = model.decode(segment, options)
 
-        return results
+            needs_fallback = False
+            if compression_ratio_threshold is not None and decode_result.compression_ratio > compression_ratio_threshold:
+                needs_fallback = True  # too repetitive
+            if logprob_threshold is not None and decode_result.avg_logprob < logprob_threshold:
+                needs_fallback = True  # average log probability is too low
+
+            if not needs_fallback:
+                break
+
+        return decode_result
 
     seek = 0
     input_stride = exact_div(
@@ -136,6 +134,11 @@ def transcribe(
     all_tokens = []
     all_segments = []
     prompt_reset_since = 0
+
+    initial_prompt = decode_options.pop("initial_prompt", None) or []
+    if initial_prompt:
+        initial_prompt = tokenizer.encode(" " + initial_prompt.strip())
+        all_tokens.extend(initial_prompt)
 
     def add_segment(
         *, start: float, end: float, text_tokens: torch.Tensor, result: DecodingResult
@@ -165,14 +168,14 @@ def transcribe(
     num_frames = mel.shape[-1]
     previous_seek_value = seek
 
-    with tqdm.tqdm(total=num_frames, unit='frames', disable=verbose) as pbar:
+    with tqdm.tqdm(total=num_frames, unit='frames', disable=verbose is not False) as pbar:
         while seek < num_frames:
             timestamp_offset = float(seek * HOP_LENGTH / SAMPLE_RATE)
-            segment = pad_or_trim(mel[:, :, seek:], N_FRAMES).to(model.device).to(dtype)
+            segment = pad_or_trim(mel[:, seek:], N_FRAMES).to(model.device).to(dtype)
             segment_duration = segment.shape[-1] * HOP_LENGTH / SAMPLE_RATE
 
             decode_options["prompt"] = all_tokens[prompt_reset_since:]
-            result = decode_with_fallback(segment)[0]
+            result: DecodingResult = decode_with_fallback(segment)
             tokens = torch.tensor(result.tokens)
 
             if no_speech_threshold is not None:
@@ -213,7 +216,7 @@ def transcribe(
             else:
                 duration = segment_duration
                 timestamps = tokens[timestamp_tokens.nonzero().flatten()]
-                if len(timestamps) > 0:
+                if len(timestamps) > 0 and timestamps[-1].item() != tokenizer.timestamp_begin:
                     # no consecutive timestamps but it has a timestamp; use the last one.
                     # single timestamp at the end means no speech after the last timestamp.
                     last_timestamp_position = timestamps[-1].item() - tokenizer.timestamp_begin
@@ -237,7 +240,7 @@ def transcribe(
             pbar.update(min(num_frames, seek) - previous_seek_value)
             previous_seek_value = seek
 
-    return dict(text=tokenizer.decode(all_tokens), segments=all_segments, language=language)
+    return dict(text=tokenizer.decode(all_tokens[len(initial_prompt):]), segments=all_segments, language=language)
 
 
 def cli():
@@ -246,6 +249,7 @@ def cli():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("audio", nargs="+", type=str, help="audio file(s) to transcribe")
     parser.add_argument("--model", default="small", choices=available_models(), help="name of the Whisper model to use")
+    parser.add_argument("--model_dir", type=str, default=None, help="the path to save model files; uses ~/.cache/whisper by default")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu", help="device to use for PyTorch inference")
     parser.add_argument("--output_dir", "-o", type=str, default=".", help="directory to save the outputs")
     parser.add_argument("--verbose", type=str2bool, default=True, help="whether to print out the progress and debug messages")
@@ -256,10 +260,11 @@ def cli():
     parser.add_argument("--temperature", type=float, default=0, help="temperature to use for sampling")
     parser.add_argument("--best_of", type=optional_int, default=5, help="number of candidates when sampling with non-zero temperature")
     parser.add_argument("--beam_size", type=optional_int, default=5, help="number of beams in beam search, only applicable when temperature is zero")
-    parser.add_argument("--patience", type=float, default=0.0, help="optional patience value to use in beam decoding, as in https://arxiv.org/abs/2204.05424, the default (0.0) is equivalent to not using patience")
+    parser.add_argument("--patience", type=float, default=None, help="optional patience value to use in beam decoding, as in https://arxiv.org/abs/2204.05424, the default (1.0) is equivalent to conventional beam search")
     parser.add_argument("--length_penalty", type=float, default=None, help="optional token length penalty coefficient (alpha) as in https://arxiv.org/abs/1609.08144, uses simple lengt normalization by default")
 
     parser.add_argument("--suppress_tokens", type=str, default="-1", help="comma-separated list of token ids to suppress during sampling; '-1' will suppress most special characters except common punctuations")
+    parser.add_argument("--initial_prompt", type=str, default=None, help="optional text to provide as a prompt for the first window.")
     parser.add_argument("--condition_on_previous_text", type=str2bool, default=True, help="if True, provide the previous output of the model as a prompt for the next window; disabling may make the text inconsistent across windows, but the model becomes less prone to getting stuck in a failure loop")
     parser.add_argument("--fp16", type=str2bool, default=True, help="whether to perform inference in fp16; True by default")
 
@@ -270,6 +275,7 @@ def cli():
 
     args = parser.parse_args().__dict__
     model_name: str = args.pop("model")
+    model_dir: str = args.pop("model_dir")
     output_dir: str = args.pop("output_dir")
     device: str = args.pop("device")
     os.makedirs(output_dir, exist_ok=True)
@@ -286,7 +292,7 @@ def cli():
         temperature = [temperature]
 
     from . import load_model
-    model = load_model(model_name, device=device)
+    model = load_model(model_name, device=device, download_root=model_dir)
 
     for audio_path in args.pop("audio"):
         result = transcribe(model, audio_path, temperature=temperature, **args)
@@ -295,7 +301,7 @@ def cli():
 
         # save TXT
         with open(os.path.join(output_dir, audio_basename + ".txt"), "w", encoding="utf-8") as txt:
-            print(result["text"], file=txt)
+            write_txt(result["segments"], file=txt)
 
         # save VTT
         with open(os.path.join(output_dir, audio_basename + ".vtt"), "w", encoding="utf-8") as vtt:
