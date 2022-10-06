@@ -11,14 +11,14 @@ try:
     from .audio import SAMPLE_RATE, N_FRAMES, HOP_LENGTH, pad_or_trim, log_mel_spectrogram
     from .decoding import DecodingOptions, DecodingResult
     from .tokenizer import LANGUAGES, TO_LANGUAGE_CODE, get_tokenizer
-    from .utils import exact_div, format_timestamp, optional_int, optional_float, str2bool, write_vtt, write_srt
+    from .utils import exact_div, format_timestamp, optional_int, optional_float, str2bool, write_txt, write_vtt, write_srt
     if TYPE_CHECKING:
         from .model import Whisper
 except ImportError:
     from whisper.audio import SAMPLE_RATE, N_FRAMES, HOP_LENGTH, pad_or_trim, log_mel_spectrogram
     from whisper.decoding import DecodingOptions, DecodingResult
     from whisper.tokenizer import LANGUAGES, TO_LANGUAGE_CODE, get_tokenizer
-    from whisper.utils import exact_div, format_timestamp, optional_int, optional_float, str2bool, write_vtt, write_srt
+    from whisper.utils import exact_div, format_timestamp, optional_int, optional_float, str2bool, write_txt, write_vtt, write_srt
     if TYPE_CHECKING:
         from whisper.model import Whisper
 
