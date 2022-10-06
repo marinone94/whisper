@@ -1,3 +1,5 @@
+import time
+
 import whisper
 from whisper.audio import StreamAudio
 
@@ -10,6 +12,7 @@ lang = None
 with StreamAudio(filepath) as audio_stream:
     audio_generator = audio_stream.generator()
     for chunk in audio_generator:
+        t = time.time()
         audio = whisper.pad_or_trim(chunk, trim_start=True)
 
         # make log-Mel spectrogram and move to the same device as the model
@@ -28,5 +31,9 @@ with StreamAudio(filepath) as audio_stream:
         # print the recognized text
         text = result.text
         print(text, end="\r")
-    
+
+        # emulate realtime streaming
+        dt = time.time() - t
+        time.sleep(max(0, 1 - dt)) 
+
     print(text)
