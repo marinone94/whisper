@@ -127,7 +127,7 @@ So, if we tokenize and embed `"This is a tokenization example"` using Whisper la
 ```python
 >>> t = torch.tensor(token_ids)
 >>> t
-tensor([5723,  307,  257,  220,   83, 8406, 2144, 1365])
+tensor([5723, 307, 257, 220, 83, 8406, 2144, 1365])
 >>> t.shape
 torch.Size([8])
 
@@ -163,6 +163,107 @@ After, comes the main task. Since the authors refer to `transcribe` as the task 
 Last, the model was trained to predict tokens timestamps when available in the training data, and a `"<|notimestamp|>"` token was added after the main task when no such information was available. Timestamps are predicted relative to the current audio segment and quantised to 20 milliseconds, and added to the vocabulary. The model then predicts: [..., `token_start_time`, `token`, `token_end_time`]. If the token audio is not entirely included in the 30 seconds chunk, then no `token_end_time` will be predicted. This indicates that the next segment should be shifted back to include the beginning of the last token of the current chunk, for it allows accurate long-audio transcriptions.
 
 Each transcript was closed with a `"<|endoftranscript|>"` token. Whisper predicting it indicates that the transcription is completed, and no further tokens should be predicted. It is the stop signal.
+
+## Example
+So, let's put all the pieces together. We will use the Huggingface implementation to transcribe the audio file used by OpenAI to test their codebase.
+
+Note that, at the time of writing, this implementation does not allow to include timestamps therefore they will be skipped even if we don't set the `"<|notimestamp|>"` input token.
+
+Model and processor details will be covered in a future article.
+
+```python
+# Import required packages
+>>> import librosa
+>>> from transformers import WhisperProcessor, WhisperForConditionalGeneration
+
+# Load processor: feature processor + tokenizer
+>>> processor = WhisperProcessor.from_pretrained("openai/whisper-large")
+
+# Load model architecture and weights
+>>> model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-large")
+
+# Load audio file
+>>> data, samplerate = librosa.load("tests/jfk.flac", sr=16000)
+>>> data
+array([-3.1826513e-08, -5.7742401e-08, -6.5911493e-08, ...,
+       -7.7829091e-03, -1.8314138e-02, -1.4547420e-02], dtype=float32)
+
+# File duration (seconds) * Sample rate
+>>> data.shape
+(176000,)
+
+# Convert input audio to log-mel spectrogram
+>>> input_features = processor(data, return_tensors="pt").input_features
+
+>>> input_features
+tensor([[[-0.5387, -0.5387, -0.5387,  ..., -0.5387, -0.5387, -0.5387],
+         [-0.5387, -0.5387, -0.5387,  ..., -0.5387, -0.5387, -0.5387],
+         [-0.5387, -0.5387, -0.5387,  ..., -0.5387, -0.5387, -0.5387],
+         ...,
+         [-0.5387, -0.5387, -0.5387,  ..., -0.5387, -0.5387, -0.5387],
+         [-0.5387, -0.5387, -0.5387,  ..., -0.5387, -0.5387, -0.5387],
+         [-0.5387, -0.5387, -0.5387,  ..., -0.5387, -0.5387, -0.5387]]])
+
+>>> input_features.shape
+torch.Size([1, 80, 3000])
+
+>>> input_features.max(), input_features.min(), input_features.mean(), input_features.std()
+(tensor(1.4613), tensor(-0.5387), tensor(-0.2950), tensor(0.4221))
+
+# Get tokens to initiate transcription and store them in the model config
+>>> init_tokens = processor.get_decoder_prompt_ids(language="en", task="transcribe", no_timestamps=True)
+>>> init_tokens
+[(1, 50259), (2, 50359), (3, 50363)]
+
+# Under the hood, this will force the model to predict these tokens in the beginning of the transcription
+>>> model.config.forced_decoder_ids = init_tokens
+
+# Generate transcription tokens
+>>> transcription_token_ids = model.generate(input_features)
+>>> transcription_token_ids
+tensor([[50258, 50259, 50359, 50363, 400, 370, 452, 7177, 6280, 11, 1029, 406, 437, 428, 1941, 393, 360, 337, 291, 11, 3365, 437, 291, 393, 360, 337, 428, 1941, 13, 50257]])
+
+>>> transcription_token_ids.shape
+torch.Size([1, 30])
+
+# Analyze and decode transcription
+# NOTE: input_features is a batch of one element,
+# and the returned token ids are batched analogously
+>>> transcription_token_ids = transcription_token_ids[0]
+>>> transcription_token_ids.shape
+torch.Size([30])
+
+>>> tokens = [processor.tokenizer.decode(token) for token in transcription_token_ids]
+>>> tokens
+['<|startoftranscript|>',
+ '<|en|>',
+ '<|transcribe|>',
+ '<|notimestamps|>',
+ ' And',
+ ' so',
+ ' my',
+ ' fellow',
+ ' Americans',
+ ',',
+ ...
+ ' for',
+ ' your',
+ ' country',
+ '.',
+ '<|endoftext|>']
+
+>>> raw_transcription = processor.decode(transcription_token_ids)
+raw_transcription
+'<|startoftranscript|><|en|><|transcribe|><|notimestamps|> And so my fellow Americans, ask not what your country can do for you, asking what you can do for your country.<|endoftext|>'
+
+>>> clean_transcription = processor.decode(transcription_token_ids, skip_special_tokens=True)
+>>> clean_transcription
+' And so my fellow Americans, ask not what your country can do for you, asking what you can do for your country.'
+
+>>> clean_transcription.strip()
+'And so my fellow Americans, ask not what your country can do for you, asking what you can do for your country.'
+
+```
 
 ## Evaluation
 
