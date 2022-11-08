@@ -18,8 +18,9 @@
             //     "False",
             // ],
             "console": "integratedTerminal",
-            "justMyCode": true,
+            "justMyCode": false,
             "python": "${workspaceFolder}/venv/bin/python",
+            "env": {"PYDEVD_WARN_SLOW_RESOLVE_TIMEOUT": "5"}
         }
     ]
 }
