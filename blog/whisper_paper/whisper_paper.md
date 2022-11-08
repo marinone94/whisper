@@ -214,6 +214,8 @@ torch.Size([1, 80, 3000])
 >>> init_tokens = processor.get_decoder_prompt_ids(language="en", task="transcribe", no_timestamps=True)
 >>> init_tokens
 [(1, 50259), (2, 50359), (3, 50363)]
+>>> [processor.tokenizer.decode(kv[1]) for kv in init_tokens]
+['<|en|>', '<|transcribe|>', '<|notimestamps|>']
 
 # Under the hood, this will force the model to predict these tokens in the beginning of the transcription
 >>> model.config.forced_decoder_ids = init_tokens
