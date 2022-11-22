@@ -121,16 +121,19 @@ Whoho, a lot of fancy words here, but what is a log-Mel spectrogram, and why is 
 
 Without entering into many details, the input audio is converted from the time domanin to the frequency domanin. Every signal (and audio makes no exception) can be decomposed into a sum of fundamental signals, each with its own frequency and amplitude, using the Fourier transform forumla. The result is the sectrum of the signal.
 
-Of course, the frequencies composing our input audio signal vary over time, so we need to calculate them at different time instants. Whisper calculates the Fourier transform of a 25 milliseconds window of the input audio, then it moves forward of 10 milliseconds and compute it again. So, on a 30 seconds audio, we will calculate the Fourier transform 3000 times. The y-axis, which represents the amplitude of each frequency, is converted to a log scale.
+Of course, the frequencies composing our input audio signal vary over time, so we need to calculate them at different time instants. Whisper calculates the Fourier transform of a 25 milliseconds window of the input audio, then it moves forward of 10 milliseconds and compute it again. So, on a 30 seconds audio, we will calculate the Fourier transform 3000 times.
 
-Alright, this might already be a lot to digest, but there is a last ingredient. Humans hear frequencies in a particular scale, the mel scale is so that equal distances between two frequencies correspond to equal differences in the human perception. Therefore, the y-axis is finally converted to the Mel scale and divided into 80 bins, and the amplitude of each bin is calculated as the average of the amplitudes of the frequencies in that bin.
+Alright, this might already be a lot to digest, but there is a last ingredient. Humans hear frequencies in a particular scale, the mel scale is so that equal distances between two frequencies correspond to equal differences in the human perception. Therefore, the y-axis is converted to the Mel scale and divided into 80 bins.
+
+The y-axis, which represents the amplitude of each frequency, is fianlly converted to a log scale.
 
 Yup! We now have our log-mel spectrogram with 80 channels computed on 25 milliseconds windows with a stride of 10 milliseconds.
 
-I understood the log-mel spectrogram thanks to Leland Robert's [great article](https://medium.com/analytics-vidhya/understanding-the-mel-spectrogram-fca2afa2ce53) posted on Medium. I am sure it will help you as well.
+I understood the log-mel spectrogram thanks to [Leland Robert's great article](https://medium.com/analytics-vidhya/understanding-the-mel-spectrogram-fca2afa2ce53) posted on Medium. I am sure it will help you as well.
 
+The following image is converted to decibels for visualization.
 <div class="img-div-any-width" markdown="0">
-  <img src="./images/log_mel.png" />
+  <img src="./images/mel_spec.png" />
   <br />
 
 </div>
